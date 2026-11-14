@@ -256,8 +256,34 @@ jobs:
             fi
           }
           rename_if_needed susfs_parse_sus_path_app_strings   susfs_parse_priority_app_strings
-          rename_if_needed susfs_set_sus_path_uid_filter      susfs_set_priority_uid_filter
-          rename_if_needed CMD_SUSFS_SET_SUS_PATH_UID_FILTER  CMD_SUSFS_SET_PRIORITY_UID_FILTER
+
+          # KSU-Next dispatch.c already has a priority_uid_filter case, so the old
+          # sus_path_uid_filter case must be removed (renaming it = duplicate case).
+          python3 - <<'PYEOF'
+          import pathlib, re
+          p = pathlib.Path("KernelSU-Next/kernel/supercall/dispatch.c")
+          if not p.exists():
+              print("[warn] dispatch.c not found")
+              raise SystemExit(0)
+          lines = p.read_text().split("\n")
+          has_new = any("case CMD_SUSFS_SET_PRIORITY_UID_FILTER" in l for l in lines)
+          out, i, removed = [], 0, 0
+          while i < len(lines):
+              l = lines[i]
+              if has_new and re.match(r"\s*case\s+CMD_SUSFS_SET_SUS_PATH_UID_FILTER\s*:", l):
+                  j = i + 1
+                  while j < len(lines) and not re.match(r"\s*(break|return)\b", lines[j]) and not re.match(r"\s*case\s", lines[j]):
+                      j += 1
+                  if j < len(lines) and re.match(r"\s*(break|return)\b", lines[j]):
+                      j += 1
+                  removed += 1
+                  i = j
+                  continue
+              out.append(l)
+              i += 1
+          p.write_text("\n".join(out))
+          print(f"[ok] removed {removed} old sus_path_uid_filter case(s)")
+          PYEOF
 
           echo "===== susfs symbols used by KSU-Next but missing in SUSFS ====="
           for s in $(grep -rhoE '\b(susfs_[a-z0-9_]+|CMD_SUSFS_[A-Z0-9_]+)' KernelSU-Next/kernel | sort -u); do
