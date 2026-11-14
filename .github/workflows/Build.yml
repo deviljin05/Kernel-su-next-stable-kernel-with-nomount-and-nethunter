@@ -235,6 +235,26 @@ jobs:
           rm -f static.patch static.patch.orig
 
       # ============================================================
+      # FIX: KernelSU-Next <-> SUSFS API mismatch
+      # throne_tracker.h calls susfs_parse_sus_path_app_strings() but
+      # SUSFS v2.4.0 (gki-android12-5.10) only has
+      # susfs_parse_priority_app_strings(). Declare an empty inline stub.
+      # ============================================================
+      - name: Declare missing susfs_parse_sus_path_app_strings
+        working-directory: kernel_workspace/common
+        run: |
+          set -euo pipefail
+          H=include/linux/susfs.h
+          if grep -q 'susfs_parse_sus_path_app_strings' "$H"; then
+            echo "already declared, skipping"
+          else
+            grep -q 'void susfs_parse_priority_app_strings(void);' "$H" \
+              || { echo "::error::anchor not found in susfs.h"; exit 1; }
+            sed -i '/void susfs_parse_priority_app_strings(void);/a static inline void susfs_parse_sus_path_app_strings(void) { }' "$H"
+          fi
+          grep -n 'susfs_parse_' "$H"
+
+      # ============================================================
       # NoMount (built-in)
       # ============================================================
       - name: Integrate NoMount (built-in)
