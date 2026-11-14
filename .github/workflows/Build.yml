@@ -235,24 +235,34 @@ jobs:
           rm -f static.patch static.patch.orig
 
       # ============================================================
-      # FIX: KernelSU-Next <-> SUSFS API mismatch
-      # throne_tracker.h calls susfs_parse_sus_path_app_strings() but
-      # SUSFS v2.4.0 (gki-android12-5.10) only has
-      # susfs_parse_priority_app_strings(). Declare an empty inline stub.
+      # FIX: KernelSU-Next <-> SUSFS API name mismatch
+      # KSU-Next (dev-susfs) uses old sus_path_* names, SUSFS v2.4.0
+      # renamed them to priority_*. Rename on the KSU-Next side only
+      # when SUSFS lacks the old name and has the new one.
       # ============================================================
-      - name: Declare missing susfs_parse_sus_path_app_strings
+      - name: Align KernelSU-Next with SUSFS API names (sus_path -> priority)
         working-directory: kernel_workspace/common
         run: |
           set -euo pipefail
-          H=include/linux/susfs.h
-          if grep -q 'susfs_parse_sus_path_app_strings' "$H"; then
-            echo "already declared, skipping"
-          else
-            grep -q 'void susfs_parse_priority_app_strings(void);' "$H" \
-              || { echo "::error::anchor not found in susfs.h"; exit 1; }
-            sed -i '/void susfs_parse_priority_app_strings(void);/a static inline void susfs_parse_sus_path_app_strings(void) { }' "$H"
-          fi
-          grep -n 'susfs_parse_' "$H"
+          rename_if_needed() {
+            local OLD="$1" NEW="$2"
+            if grep -rqsw "$OLD" include/ fs/susfs.c; then
+              echo "[skip] SUSFS already provides $OLD"
+            elif grep -rqsw "$NEW" include/ fs/susfs.c; then
+              echo "[ok] $OLD -> $NEW"
+              grep -rlw "$OLD" KernelSU-Next/kernel | xargs -r sed -i "s/\b$OLD\b/$NEW/g"
+            else
+              echo "::warning::neither $OLD nor $NEW found in SUSFS"
+            fi
+          }
+          rename_if_needed susfs_parse_sus_path_app_strings   susfs_parse_priority_app_strings
+          rename_if_needed susfs_set_sus_path_uid_filter      susfs_set_priority_uid_filter
+          rename_if_needed CMD_SUSFS_SET_SUS_PATH_UID_FILTER  CMD_SUSFS_SET_PRIORITY_UID_FILTER
+
+          echo "===== susfs symbols used by KSU-Next but missing in SUSFS ====="
+          for s in $(grep -rhoE '\b(susfs_[a-z0-9_]+|CMD_SUSFS_[A-Z0-9_]+)' KernelSU-Next/kernel | sort -u); do
+            grep -rqsw "$s" include/ fs/susfs.c || echo "MISSING: $s"
+          done
 
       # ============================================================
       # NoMount (built-in)
